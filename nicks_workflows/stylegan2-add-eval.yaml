@@ -1,0 +1,139 @@
+# StyleGAN example workflow
+# Uses its cat model & dataset because faces download was too big
+#
+# TODO: Show running training in addition to evaluation
+# This will be a command using the StyleGAN repo like
+# python run_training.py --num-gpus=8 --data-dir=~/datasets --config=config-f --dataset=cat --total-kimg=88000
+# initially on the cat subsample data, so a similar job to run evaluator
+#
+# Last updated: Apr 19th 2021
+
+name: stylegan2-add-yaml
+
+defaults:
+  resources:
+    instance-type: P4000
+
+jobs:
+
+  # Clone StyleGAN repo into managed storage provider dataset
+  # ID is from creating this dataset in the Gradient Workflows GUI
+
+  CloneRepo:
+    outputs:
+      repo:
+        type: dataset
+        with:
+          id: "dsrydbkw4yf7tlg"
+    uses: container@v1
+    with:
+      args:
+      - clone
+      - https://github.com/NVlabs/stylegan2.git
+      - /outputs/repo/stylegan2
+      image: alpine/git
+
+  # Get pretrained cat model into same dataset
+  # Model .pkl is large so is not in the above repo
+
+  ### Is there a way to only copy it once? ###
+
+  GetPretrainedModel:
+    outputs:
+      pretrainedNetwork:
+        type: dataset
+        with:
+          id: "dsrydbkw4yf7tlg"
+    uses: container@v1
+    with:
+      args:
+      - wget
+#      - https://nvlabs-fi-cdn.nvidia.com/stylegan2/networks/stylegan2-ffhq-config-f.pkl
+      - https://nvlabs-fi-cdn.nvidia.com/stylegan2/networks/stylegan2-cat-config-f.pkl
+      - -P
+      - /outputs/pretrainedNetwork
+      image: alpine:latest
+
+  # Show generating images using pretrained cat model
+  
+  StyleGan2:
+    needs:
+      - CloneRepo
+      - GetPretrainedModel
+    inputs:
+      repo: CloneRepo.outputs.repo
+      pretrainedNetwork: GetPretrainedModel.outputs.pretrainedNetwork
+#      pretrainedNetwork:
+#        type: dataset
+#	with:
+#	  id: "dsrydbkw4yf7tlg:h25h42n"
+    outputs:
+#      generatedFaces:
+      generatedCats:
+        type: dataset
+        with:
+          id: "dsrydbkw4yf7tlg"
+    uses: container@v1
+    with:
+      args:
+      - bash
+      - -c
+#      - pip install scipy==1.3.3 && pip install requests==2.22.0 && pip install Pillow==6.2.1 && cp -R /inputs/repo/stylegan2 /stylegan2 && cd /stylegan2 && python run_generator.py generate-images --network=/inputs/repo/stylegan2-ffhq-config-f.pkl --seeds=6600-6605 --truncation-psi=0.5 --result-dir=/outputs/generatedFaces
+      - pip install scipy==1.3.3 && pip install requests==2.22.0 && pip install Pillow==6.2.1 && cp -R /inputs/repo/stylegan2 /stylegan2 && cd /stylegan2 && python run_generator.py generate-images --network=/inputs/pretrainedNetwork/stylegan2-cat-config-f.pkl --seeds=6600-6605 --truncation-psi=0.5 --result-dir=/outputs/generatedCats
+      image: tensorflow/tensorflow:1.14.0-gpu-py3
+
+  # Clone cat subsample image data repo to enable evaluating the network
+  # Use git-checkout action so can pass my Git Token as a secret
+  # Managed storage provider dataset was created by GUI even though auth failed, so use the ID
+
+  ### Is this copying the cat images data each time? ###
+  
+  CloneCatRepo:
+    outputs:
+      repoCat:
+        type: dataset
+        with:
+          id: "dstaxp1zuggbxp0"
+    uses: git-checkout@v1
+    with:
+      url: https://github.com/nmb-paperspace/cat-subsample
+      username: nmb-paperspace
+#      image: alpine/git
+    env:
+      GIT_PASSWORD: secret:GIT_PASSWORD
+#    uses: container@v1
+#    with:
+#      args:
+#      - clone
+#      - https://github.com/nmb-paperspace/cat-subsample 
+#      - /outputs/repoCat/cat-subsample
+
+  # Run evaluation using pretrained cat model on cat subsample dataset
+
+  ### Way to make the bash command separate lines? ###
+
+  StyleGan2Eval:
+    needs:
+      - CloneRepo
+      - CloneCatRepo
+      - GetPretrainedModel
+    inputs:
+      repo: CloneRepo.outputs.repo
+      repoCat: CloneCatRepo.outputs.repoCat
+      pretrainedNetwork: GetPretrainedModel.outputs.pretrainedNetwork
+#      pretrainedNetwork:
+#        type: dataset
+#        with:
+#          id: "dsrydbkw4yf7tlg"
+    outputs:
+      evaluation:
+        type: dataset
+        with:
+          id: "dsrydbkw4yf7tlg"
+    uses: container@v1
+    with:
+      args:
+      - bash
+      - -c
+      - pip install scipy==1.3.3 && pip install requests==2.22.0 && pip install Pillow==6.2.1 && cp -R /inputs/repo/stylegan2 /stylegan2 && cd /stylegan2 && tar -zxf /inputs/repoCat/cat-subsample/cat_images_017.tgz && python run_metrics.py --data-dir=/inputs/repoCat/cat-subsample/cat_images_017 --network=/inputs/pretrainedNetwork/stylegan2-cat-config-f.pkl --metrics=fid50k,ppl2_wend --dataset=cat --result-dir=/outputs/evaluation
+      image: tensorflow/tensorflow:1.14.0-gpu-py3
