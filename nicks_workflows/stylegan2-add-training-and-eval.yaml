@@ -148,7 +148,7 @@ jobs:
       - CloneRepo
       - CloneCatRepo
       - GetPretrainedModel
-      - StyleGan2Train # If step 5 train is full-size model, can take its network as input
+#      - StyleGan2Train # If step 5 train is full-size model, can take its network as input. ### Won't run if 5 fails so comment out for now. ###
     inputs:
       repoCat:
         type: volume
